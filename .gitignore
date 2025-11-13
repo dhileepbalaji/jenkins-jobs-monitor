@@ -1,3 +1,73 @@
-/.DS_Store
-/Archive.zip
-/jenkins-monitor-x86_64
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go build output (compiled binaries)
+*.out
+*.a
+*.o
+
+# Temporary build directories
+bin/
+build/
+dist/
+out/
+release/
+
+# Coverage and test files
+*.cover
+*.cov
+*.prof
+*.test
+*.tmp
+coverage.txt
+profile.out
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# IDE/editor metadata
+# VS Code
+.vscode/
+# JetBrains / GoLand
+.idea/
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+
+# Linux / macOS temp files
+*~
+*.bak
+*.orig
+
+# Go modules (you should commit go.mod/go.sum)
+vendor/
+
+# If you vendor dependencies manually and don't want to commit them
+# Uncomment below line if you use go mod vendor but don't want to include vendor/
+# /vendor/
+
+# Generated files (Protobuf, mocks, etc.)
+*.pb.go
+mock_*.go
+*_mock.go
+
+# Environment / config files
+.env
+.env.*
+*.local
+config.yaml
+config.yml
+
+# Specific app artifacts (example)
+**/jenkins-monitor*
