@@ -70,4 +70,9 @@ config.yaml
 config.yml
 
 # Specific app artifacts (example)
-**/jenkins-monitor*
+# Specific app artifacts (example)
+# Ignore the binary named jenkins-monitor in the root or any subdirectory, BUT NOT the directory itself
+jenkins-monitor
+!cmd/jenkins-monitor/
+*.zip
+*.csv

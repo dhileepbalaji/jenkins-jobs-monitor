@@ -54,7 +54,12 @@ func TestGetDir(t *testing.T) {
 		{
 			name:     "Root path",
 			path:     "/processes.csv",
-			expected: "",
+			expected: "/",
+		},
+		{
+			name:     "Current dir",
+			path:     "processes.csv",
+			expected: ".",
 		},
 	}
 

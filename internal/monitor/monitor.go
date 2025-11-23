@@ -3,16 +3,56 @@ package monitor
 import (
 	"encoding/csv"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"jenkins-monitor/internal/config"
+	"jenkins-monitor/internal/notifier"
 	"jenkins-monitor/internal/process"
 	"jenkins-monitor/internal/utils"
 )
 
-func RunMonitor(outputFile string) {
+var (
+	jenkinsCPUUsage = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "jenkins_job_cpu_usage_percent",
+			Help: "Current CPU usage percentage of Jenkins jobs.",
+		},
+		[]string{"job_name", "pid"},
+	)
+	jenkinsMemoryUsage = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "jenkins_job_memory_usage_percent",
+			Help: "Current memory usage percentage of Jenkins jobs.",
+		},
+		[]string{"job_name", "pid"},
+	)
+)
+
+func init() {
+	// Register the metrics with Prometheus's default registry.
+	prometheus.MustRegister(jenkinsCPUUsage)
+	prometheus.MustRegister(jenkinsMemoryUsage)
+}
+
+func RunMonitor(outputFile string, cfg *config.Config) {
+	// Start Prometheus metrics HTTP server
+	if cfg.Prometheus.ListenAddress != "" {
+		go func() {
+			http.Handle("/metrics", promhttp.Handler())
+			utils.Info(fmt.Sprintf("Starting Prometheus metrics server on %s", cfg.Prometheus.ListenAddress))
+			if err := http.ListenAndServe(cfg.Prometheus.ListenAddress, nil); err != nil {
+				utils.Fatal(fmt.Sprintf("Failed to start Prometheus metrics server: %v", err)) // Changed to Fatal
+			}
+		}()
+	}
+
 	// Ensure the output directory exists
 	outputDir := utils.GetDir(outputFile)
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
@@ -64,10 +104,26 @@ func RunMonitor(outputFile string) {
 
 			timestamp := time.Now().UTC().Format(time.RFC3339)
 			for _, p := range processes {
+				// Update Prometheus metrics
+				labels := prometheus.Labels{"job_name": p.BuildJobName, "pid": fmt.Sprintf("%d", p.PID)}
+				jenkinsCPUUsage.With(labels).Set(p.CPU)
+				jenkinsMemoryUsage.With(labels).Set(float64(p.Mem))
+
+				// Check for thresholds and send Slack notifications
+				if cfg.Thresholds.CPUPercent > 0 && p.CPU >= cfg.Thresholds.CPUPercent {
+					utils.Info(fmt.Sprintf("High CPU usage detected for job %s (PID %d): %.2f%% (Threshold: %.2f%%)", p.BuildJobName, p.PID, p.CPU, cfg.Thresholds.CPUPercent))
+					notifier.SendSlackNotification(cfg, "CPU_HIGH", &p)
+				}
+				if cfg.Thresholds.MemPercent > 0 && float64(p.Mem) >= cfg.Thresholds.MemPercent {
+					utils.Info(fmt.Sprintf("High Memory usage detected for job %s (PID %d): %.2f%% (Threshold: %.2f%%)", p.BuildJobName, p.PID, p.Mem, cfg.Thresholds.MemPercent))
+					notifier.SendSlackNotification(cfg, "MEM_HIGH", &p)
+				}
+
+				// Write to CSV
 				record := []string{
 					timestamp,
 					fmt.Sprintf("%d", p.PID),
-					p.BuildJobName,
+					p.BuildJobName, // Use BuildJobName for build_path in CSV
 					fmt.Sprintf("%.2f", p.CPU),
 					fmt.Sprintf("%.2f", p.Mem),
 				}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,16 +32,21 @@ type LogEntry struct {
 var globalLogger *Logger
 
 // SetupLogging initializes the global logger to write to both a file and console
-func SetupLogging() {
-	logFilePath := "jenkinsjobmonitor.log" // Default log file in current directory
+func SetupLogging(logFilePath string) {
+	var writers []io.Writer
+	writers = append(writers, os.Stdout)
 
-	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("Failed to open log file %s: %v", logFilePath, err)
+	if logFilePath != "" {
+		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Printf("Failed to open log file %s: %v. Logging to stdout only.", logFilePath, err)
+		} else {
+			writers = append(writers, file)
+		}
 	}
 
 	// Create a multi-writer to write to both file and console
-	multiWriter := io.MultiWriter(os.Stdout, file)
+	multiWriter := io.MultiWriter(writers...)
 
 	globalLogger = &Logger{
 		logger: log.New(multiWriter, "", 0), // No default flags, we'll format manually
@@ -49,16 +55,28 @@ func SetupLogging() {
 
 // Info logs an informational message
 func Info(message string) {
+	if globalLogger == nil {
+		log.Println("INFO: " + message)
+		return
+	}
 	globalLogger.log("INFO", message)
 }
 
 // Error logs an error message
 func Error(message string) {
+	if globalLogger == nil {
+		log.Println("ERROR: " + message)
+		return
+	}
 	globalLogger.log("ERROR", message)
 }
 
 // Fatal logs a fatal error message and exits
 func Fatal(message string) {
+	if globalLogger == nil {
+		log.Println("FATAL: " + message)
+		os.Exit(1)
+	}
 	globalLogger.log("FATAL", message)
 	os.Exit(1)
 }
@@ -87,14 +105,11 @@ func (l *Logger) log(level, message string) {
 }
 
 func ParseFloat(s string) (float64, error) {
-	var f float64
-	_, err := fmt.Sscanf(s, "%f", &f)
-	return f, err
+	return strconv.ParseFloat(s, 64)
 }
 
 func GetDir(path string) string {
-	parts := strings.Split(path, "/")
-	return strings.Join(parts[:len(parts)-1], "/")
+	return filepath.Dir(path)
 }
 
 func PrintLine(length int) {
