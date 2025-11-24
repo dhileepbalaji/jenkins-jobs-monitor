@@ -9,9 +9,10 @@ import (
 
 // Config holds the application's configuration
 type Config struct {
-	Prometheus PrometheusConfig `yaml:"prometheus"`
-	Slack      SlackConfig      `yaml:"slack"`
-	Thresholds ThresholdsConfig `yaml:"thresholds"`
+	Prometheus        PrometheusConfig `yaml:"prometheus"`
+	Slack             SlackConfig      `yaml:"slack"`
+	Thresholds        ThresholdsConfig `yaml:"thresholds"`
+	DisableCollection bool             `yaml:"disable_collection"`
 }
 
 // PrometheusConfig holds Prometheus-related configuration

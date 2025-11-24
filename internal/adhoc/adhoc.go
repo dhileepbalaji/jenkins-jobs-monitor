@@ -37,8 +37,8 @@ func RunAdhoc() {
 	// Create tabwriter for aligned columns
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-	fmt.Fprintf(w, "%-10s\t%-20s\t%-35s\t%-15s\t%-10s\t%-8s\t%-8s\t%-40s\n",
-		"PID", "PROCESS", "JOB_NAME", "BUILD_ID", "CPU%", "MEM%", "WORKSPACE", "STAGE_NAME")
+	fmt.Fprintf(w, "%-10s\t%-8s\t%-8s\t%-20s\t%-35s\t%-15s\t%-40s\t%-10s\n",
+		"PID", "CPU%", "MEM%", "PROCESS", "JOB_NAME", "BUILD_ID", "WORKSPACE", "STAGE_NAME")
 	fmt.Fprintln(w, strings.Repeat("-", 160))
 
 	for _, p := range processes {
@@ -49,8 +49,8 @@ func RunAdhoc() {
 			}
 		}
 
-		fmt.Fprintf(w, "%-10d\t%-20s\t%-35s\t%-15s\t%8.1f\t%8.1f\t%-40s\t%-10s\n",
-			p.PID, name, p.BuildJobName, p.BuildId, p.CPU, p.Mem, p.WorkSpace, p.StageName)
+		fmt.Fprintf(w, "%-10d\t%8.1f\t%8.1f\t%-20s\t%-35s\t%-15s\t%-40s\t%-10s\n",
+			p.PID, p.CPU, p.Mem, name, p.BuildJobName, p.BuildId, p.WorkSpace, p.StageName)
 	}
 
 	w.Flush()

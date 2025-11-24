@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,36 +50,53 @@ func RunMonitor(outputFile string, cfg *config.Config) {
 			http.Handle("/metrics", promhttp.Handler())
 			utils.Info(fmt.Sprintf("Starting Prometheus metrics server on %s", cfg.Prometheus.ListenAddress))
 			if err := http.ListenAndServe(cfg.Prometheus.ListenAddress, nil); err != nil {
-				utils.Fatal(fmt.Sprintf("Failed to start Prometheus metrics server: %v", err)) // Changed to Fatal
+				utils.Fatal(fmt.Sprintf("Failed to start Prometheus metrics server: %v", err))
 			}
 		}()
 	}
 
-	// Ensure the output directory exists
-	outputDir := utils.GetDir(outputFile)
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
-			utils.Fatal(fmt.Sprintf("Failed to create output directory: %v", err))
+	var file *os.File
+	var writer *csv.Writer
+	var currentDay int
+
+	// Initialize CSV collection if enabled
+	if !cfg.DisableCollection {
+		// Ensure the output directory exists
+		outputDir := utils.GetDir(outputFile)
+		if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				utils.Fatal(fmt.Sprintf("Failed to create output directory: %v", err))
+			}
 		}
-	}
 
-	// Create or open the output file
-	file, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		utils.Fatal(fmt.Sprintf("Failed to open output file: %v", err))
-	}
-	defer file.Close()
+		openCSV := func() {
+			var err error
+			file, err = os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				utils.Fatal(fmt.Sprintf("Failed to open output file: %v", err))
+			}
+			writer = csv.NewWriter(file)
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
+			// Write header if the file is new
+			info, err := file.Stat()
+			if err != nil {
+				utils.Fatal(fmt.Sprintf("Failed to get file info: %v", err))
+			}
+			if info.Size() == 0 {
+				writer.Write([]string{"timestamp", "pid", "cpu", "mem", "build_path"})
+				writer.Flush()
+			}
+		}
 
-	// Write header if the file is new
-	info, err := file.Stat()
-	if err != nil {
-		utils.Fatal(fmt.Sprintf("Failed to get file info: %v", err))
-	}
-	if info.Size() == 0 {
-		writer.Write([]string{"timestamp", "pid", "build_path", "cpu", "mem"})
+		openCSV()
+		defer func() {
+			if file != nil {
+				file.Close()
+			}
+		}()
+		currentDay = time.Now().Day()
+	} else {
+		utils.Info("Collection disabled via config. Only alerting will be active.")
 	}
 
 	// Create a channel to receive OS signals
@@ -89,7 +108,11 @@ func RunMonitor(outputFile string, cfg *config.Config) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	utils.Info(fmt.Sprintf("Starting process monitoring. Writing to %s", outputFile))
+	if !cfg.DisableCollection {
+		utils.Info(fmt.Sprintf("Starting process monitoring. Writing to %s", outputFile))
+	} else {
+		utils.Info("Starting process monitoring (Alerting Only).")
+	}
 	utils.Info("Press Ctrl+C to stop...")
 
 	// Run the collection logic in a loop
@@ -100,6 +123,40 @@ func RunMonitor(outputFile string, cfg *config.Config) {
 			if err != nil {
 				utils.Error(fmt.Sprintf("Error getting Jenkins processes: %v", err))
 				continue
+			}
+
+			// Log Rotation Logic
+			if !cfg.DisableCollection {
+				now := time.Now()
+				if now.Day() != currentDay {
+					utils.Info("Rotating log file...")
+					file.Close()
+
+					// Rename old file
+					yesterday := now.AddDate(0, 0, -1)
+					rotatedName := fmt.Sprintf("%s.%s.csv", outputFile, yesterday.Format("2006-01-02"))
+					// Handle if outputFile is just a filename or path
+					ext := filepath.Ext(outputFile)
+					base := strings.TrimSuffix(outputFile, ext)
+					rotatedName = fmt.Sprintf("%s.%s%s", base, yesterday.Format("2006-01-02"), ext)
+
+					if err := os.Rename(outputFile, rotatedName); err != nil {
+						utils.Error(fmt.Sprintf("Failed to rotate log file: %v", err))
+					}
+
+					// Re-open new file
+					var err error
+					file, err = os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						utils.Fatal(fmt.Sprintf("Failed to open output file: %v", err))
+					}
+					writer = csv.NewWriter(file)
+					writer.Write([]string{"timestamp", "pid", "cpu", "mem", "build_path"})
+					writer.Flush()
+
+					currentDay = now.Day()
+					utils.Info(fmt.Sprintf("Log rotated. New file: %s", outputFile))
+				}
 			}
 
 			timestamp := time.Now().UTC().Format(time.RFC3339)
@@ -119,18 +176,24 @@ func RunMonitor(outputFile string, cfg *config.Config) {
 					notifier.SendSlackNotification(cfg, "MEM_HIGH", &p)
 				}
 
-				// Write to CSV
-				record := []string{
-					timestamp,
-					fmt.Sprintf("%d", p.PID),
-					p.BuildJobName, // Use BuildJobName for build_path in CSV
-					fmt.Sprintf("%.2f", p.CPU),
-					fmt.Sprintf("%.2f", p.Mem),
+				// Write to CSV if collection is enabled
+				if !cfg.DisableCollection {
+					record := []string{
+						timestamp,
+						fmt.Sprintf("%d", p.PID),
+						fmt.Sprintf("%.2f", p.CPU),
+						fmt.Sprintf("%.2f", p.Mem),
+						p.BuildJobName,
+					}
+					writer.Write(record)
 				}
-				writer.Write(record)
 			}
-			writer.Flush()
-			utils.Info(fmt.Sprintf("Collected data for %d processes", len(processes)))
+			if !cfg.DisableCollection {
+				writer.Flush()
+				utils.Info(fmt.Sprintf("Collected data for %d processes", len(processes)))
+			} else {
+				utils.Info(fmt.Sprintf("Monitored %d processes (Collection Disabled)", len(processes)))
+			}
 
 		case <-sigs:
 			utils.Info("Exiting...")

@@ -41,9 +41,9 @@ func RunAnalyzer(inputFile string) {
 	jobStats := make(map[string]*JobStats)
 
 	for _, record := range records {
-		buildPath := record[2]
-		cpu, _ := utils.ParseFloat(record[3])
-		mem, _ := utils.ParseFloat(record[4])
+		cpu, _ := utils.ParseFloat(record[2])
+		mem, _ := utils.ParseFloat(record[3])
+		buildPath := record[4]
 		timestamp := record[0]
 
 		if _, ok := jobStats[buildPath]; !ok {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io" // Use io.ReadAll instead of ioutil.ReadAll
+	"io"
 	"net/http"
 	"time"
 
@@ -17,25 +17,64 @@ import (
 type SlackMessage struct {
 	Channel     string       `json:"channel,omitempty"`
 	Username    string       `json:"username,omitempty"`
-	Text        string       `json:"text,omitempty"`
 	IconEmoji   string       `json:"icon_emoji,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // Attachment represents a Slack message attachment
 type Attachment struct {
-	Color      string   `json:"color,omitempty"`
-	Fallback   string   `json:"fallback,omitempty"`
-	Text       string   `json:"text,omitempty"`
-	Fields     []Field  `json:"fields,omitempty"`
-	MarkdownIn []string `json:"mrkdwn_in,omitempty"`
+	Color  string  `json:"color,omitempty"`
+	Blocks []Block `json:"blocks,omitempty"`
 }
 
-// Field represents a field within a Slack message attachment
-type Field struct {
-	Title string `json:"title,omitempty"`
-	Value string `json:"value,omitempty"`
-	Short bool   `json:"short,omitempty"`
+// Block represents a generic Slack block
+type Block interface {
+	isBlock()
+}
+
+// SectionBlock represents a section block
+type SectionBlock struct {
+	Type   string          `json:"type"`
+	Text   *MarkdownText   `json:"text,omitempty"`
+	Fields []*MarkdownText `json:"fields,omitempty"`
+}
+
+func (b SectionBlock) isBlock() {}
+
+// HeaderBlock represents a header block
+type HeaderBlock struct {
+	Type string    `json:"type"`
+	Text PlainText `json:"text"`
+}
+
+func (b HeaderBlock) isBlock() {}
+
+// DividerBlock represents a divider block
+type DividerBlock struct {
+	Type string `json:"type"`
+}
+
+func (b DividerBlock) isBlock() {}
+
+// ContextBlock represents a context block
+type ContextBlock struct {
+	Type     string         `json:"type"`
+	Elements []MarkdownText `json:"elements"`
+}
+
+func (b ContextBlock) isBlock() {}
+
+// MarkdownText represents a text object with markdown type
+type MarkdownText struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// PlainText represents a text object with plain_text type
+type PlainText struct {
+	Type  string `json:"type"`
+	Text  string `json:"text"`
+	Emoji bool   `json:"emoji,omitempty"`
 }
 
 // SendSlackNotification sends a structured notification to Slack
@@ -47,64 +86,66 @@ func SendSlackNotification(cfg *config.Config, alertType string, p *process.Proc
 
 	var color string
 	var title string
-	var emoji string
-	var threshold float64 // To display in the message
 
 	switch alertType {
 	case "CPU_HIGH":
 		color = "#FF0000" // Red
-		title = "High CPU Usage Alert"
-		emoji = ":fire:"
-		threshold = cfg.Thresholds.CPUPercent
+		title = "Jenkins Monitor Alert: High CPU Usage"
 	case "MEM_HIGH":
-		color = "#FFA500" // Orange
-		title = "High Memory Usage Alert"
-		emoji = ":warning:"
-		threshold = cfg.Thresholds.MemPercent
+		color = "#FF0000" // Red
+		title = "Jenkins Monitor Alert: High Memory Usage"
 	default:
 		color = "#CCCCCC" // Grey
 		title = "Jenkins Monitor Alert"
-		emoji = ":bell:"
-		threshold = 0 // Default, or handle as appropriate
+	}
+
+	// Construct Blocks
+	blocks := []Block{
+		HeaderBlock{
+			Type: "header",
+			Text: PlainText{
+				Type: "plain_text",
+				Text: title,
+			},
+		},
+		DividerBlock{Type: "divider"},
+		SectionBlock{
+			Type: "section",
+			Fields: []*MarkdownText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Job Name:*\n%s", p.BuildJobName)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*PID:*\n%d", p.PID)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Build ID:*\n%s", p.BuildId)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Stage Name:*\n%s", p.StageName)},
+			},
+		},
+		SectionBlock{
+			Type: "section",
+			Fields: []*MarkdownText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Workspace:*\n%s", p.WorkSpace)},
+			},
+		},
+		SectionBlock{
+			Type: "section",
+			Fields: []*MarkdownText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*CPU Usage:*\n%.2f%% (Threshold: %.2f%%)", p.CPU, cfg.Thresholds.CPUPercent)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Memory Usage:*\n%.2f%% (Threshold: %.2f%%)", p.Mem, cfg.Thresholds.MemPercent)},
+			},
+		},
+		ContextBlock{
+			Type: "context",
+			Elements: []MarkdownText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("Timestamp: %s", time.Now().Format(time.RFC1123))},
+			},
+		},
 	}
 
 	msg := SlackMessage{
-		Channel:   cfg.Slack.Channel,
-		Username:  cfg.Slack.Username,
-		IconEmoji: emoji,
+		Channel:  cfg.Slack.Channel,
+		Username: cfg.Slack.Username,
 		Attachments: []Attachment{
 			{
-				Color:    color,
-				Fallback: fmt.Sprintf("%s: Job %s (PID %d) exceeded %s threshold (%.2f%%)", title, p.BuildJobName, p.PID, alertType, threshold),
-				Text:     fmt.Sprintf("*%s: Jenkins Job Performance Alert*", title),
-				Fields: []Field{
-					{
-						Title: "Job Name",
-						Value: p.BuildJobName,
-						Short: true,
-					},
-					{
-						Title: "PID",
-						Value: fmt.Sprintf("%d", p.PID),
-						Short: true,
-					},
-					{
-						Title: "CPU Usage",
-						Value: fmt.Sprintf("%.2f%% (Threshold: %.2f%%)", p.CPU, cfg.Thresholds.CPUPercent),
-						Short: true,
-					},
-					{
-						Title: "Memory Usage",
-						Value: fmt.Sprintf("%.2f%% (Threshold: %.2f%%)", p.Mem, cfg.Thresholds.MemPercent),
-						Short: true,
-					},
-					{
-						Title: "Timestamp",
-						Value: time.Now().Format(time.RFC1123Z),
-						Short: false,
-					},
-				},
-				MarkdownIn: []string{"text", "fields"},
+				Color:  color,
+				Blocks: blocks,
 			},
 		},
 	}
@@ -131,7 +172,7 @@ func SendSlackNotification(cfg *config.Config, alertType string, p *process.Proc
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body) // Use io.ReadAll
+		body, _ := io.ReadAll(resp.Body)
 		utils.Error(fmt.Sprintf("Received non-OK response from Slack (%d): %s", resp.StatusCode, string(body)))
 	} else {
 		utils.Info(fmt.Sprintf("Slack notification sent successfully for job %s (PID %d)", p.BuildJobName, p.PID))
