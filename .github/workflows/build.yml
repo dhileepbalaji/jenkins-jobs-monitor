@@ -38,11 +38,19 @@ jobs:
         fi
         go build -v -o $OUTPUT_NAME cmd/jenkins-monitor/main.go
 
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        path: .
+        format: spdx-json
+        output-file: sbom.spdx.json
+
     - name: Attest Build Provenance
       uses: actions/attest-build-provenance@v1
       with:
         subject-path: |
           jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}*
+        sbom-path: sbom.spdx.json
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -50,3 +58,5 @@ jobs:
         name: jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}
         path: |
           jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}*
+        if-no-files-found: error
+        retention-days: 1
