@@ -43,14 +43,15 @@ jobs:
       with:
         path: .
         format: spdx-json
-        output-file: sbom.spdx.json
+        output-file: jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}.spdx.json
+        upload-artifact: false
 
     - name: Attest Build Provenance
       uses: actions/attest-build-provenance@v1
       with:
         subject-path: |
           jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}*
-        sbom-path: sbom.spdx.json
+        sbom-path: jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}.spdx.json
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -58,5 +59,6 @@ jobs:
         name: jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}
         path: |
           jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}*
+          jenkins-monitor-${{ matrix.goos }}-${{ matrix.goarch }}.spdx.json
         if-no-files-found: error
         retention-days: 1
